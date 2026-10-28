@@ -1,0 +1,162 @@
+:root {
+  --bg: #f6f7f9;
+  --pind: #ffffff;
+  --pind2: #eef1f4;
+  --tekst: #1d2329;
+  --hall: #66707a;
+  --joon: #dde2e7;
+  --aktsent: #2f6fdb;
+  --kulu: #c23b32;
+  --tulu: #1f8a4c;
+  --hoiatus: #b7791f;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;
+    --pind: #1c2024;
+    --pind2: #252a30;
+    --tekst: #e6e9ec;
+    --hall: #9aa3ac;
+    --joon: #333a41;
+    --aktsent: #6a9ef0;
+    --kulu: #ef7a72;
+    --tulu: #5cc98a;
+    --hoiatus: #e0a84a;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--tekst);
+}
+h1, h2, h3 { margin: 0 0 12px; font-weight: 600; }
+h1 { font-size: 20px; }
+h2 { font-size: 16px; }
+a { color: var(--aktsent); }
+.laeb { padding: 24px; color: var(--hall); }
+
+/* Paigutus */
+.raam { display: grid; grid-template-columns: 200px 1fr; min-height: 100vh; }
+.kylg {
+  background: var(--pind);
+  border-right: 1px solid var(--joon);
+  padding: 16px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.kylg .logo { font-weight: 700; font-size: 18px; padding: 4px 10px 16px; }
+.kylg a {
+  display: block; padding: 8px 10px; border-radius: 6px;
+  color: var(--tekst); text-decoration: none;
+}
+.kylg a:hover { background: var(--pind2); }
+.kylg a.aktiivne { background: var(--pind2); font-weight: 600; }
+.kylg .alumine { margin-top: auto; color: var(--hall); font-size: 12px; padding: 10px; }
+.sisu { padding: 20px 24px; max-width: 1200px; width: 100%; }
+.pais { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.pais h1 { margin: 0; margin-right: auto; }
+
+@media (max-width: 760px) {
+  .raam { grid-template-columns: 1fr; }
+  .kylg {
+    flex-direction: row; flex-wrap: wrap; border-right: 0;
+    border-bottom: 1px solid var(--joon); padding: 8px;
+  }
+  .kylg .logo { padding: 8px 10px; }
+  .kylg .alumine { display: none; }
+  .sisu { padding: 16px; }
+}
+
+/* Kaardid ja tabelid */
+.kaart {
+  background: var(--pind); border: 1px solid var(--joon);
+  border-radius: 8px; padding: 16px; margin-bottom: 16px;
+}
+.vork { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.tabel-umbris { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--joon); vertical-align: top; }
+th { font-weight: 600; color: var(--hall); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+td.nr, th.nr { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.klikitav { cursor: pointer; }
+tr.klikitav:hover td { background: var(--pind2); }
+tr.kokku td { font-weight: 600; border-top: 2px solid var(--joon); }
+tr.grupp td { font-weight: 600; background: var(--pind2); }
+.kulu { color: var(--kulu); }
+.tulu { color: var(--tulu); }
+.hall { color: var(--hall); }
+.vaike { font-size: 12px; }
+.silt {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  font-size: 11px; background: var(--pind2); color: var(--hall); white-space: nowrap;
+}
+.silt.hoiatus { color: var(--hoiatus); }
+.tyhi { color: var(--hall); padding: 16px 0; }
+
+/* Vormid */
+label { display: block; font-size: 12px; color: var(--hall); margin-bottom: 3px; }
+input, select, textarea, button {
+  font: inherit; color: inherit;
+}
+input, select, textarea {
+  width: 100%; padding: 7px 9px;
+  background: var(--pind); border: 1px solid var(--joon); border-radius: 6px;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--aktsent); outline-offset: -1px; }
+input.nr { text-align: right; font-variant-numeric: tabular-nums; }
+textarea { min-height: 60px; resize: vertical; }
+.read { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 12px; }
+button {
+  padding: 7px 14px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--joon); background: var(--pind);
+}
+button:hover { background: var(--pind2); }
+button.pohi { background: var(--aktsent); border-color: var(--aktsent); color: #fff; }
+button.pohi:hover { filter: brightness(1.08); }
+button.oht { color: var(--kulu); }
+button.ikoon { padding: 4px 8px; }
+.nupud { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.nupud .vasak { margin-right: auto; }
+.valik { display: inline-flex; border: 1px solid var(--joon); border-radius: 6px; overflow: hidden; }
+.valik button { border: 0; border-radius: 0; border-right: 1px solid var(--joon); }
+.valik button:last-child { border-right: 0; }
+.valik button.valitud { background: var(--aktsent); color: #fff; }
+
+.reaTabel td { padding: 4px; border: 0; }
+.reaTabel input, .reaTabel select { padding: 5px 7px; }
+
+/* Dialoog */
+dialog {
+  border: 1px solid var(--joon); border-radius: 10px; padding: 0;
+  background: var(--pind); color: var(--tekst);
+  width: min(860px, calc(100vw - 24px)); max-height: calc(100vh - 24px);
+}
+dialog::backdrop { background: rgb(0 0 0 / .4); }
+dialog .dsisu { padding: 20px; }
+dialog h2 { margin-bottom: 16px; }
+
+.teade {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  background: var(--tekst); color: var(--bg); padding: 10px 16px; border-radius: 8px;
+  z-index: 100; max-width: calc(100vw - 32px);
+}
+.teade.viga { background: var(--kulu); color: #fff; }
+
+.login { max-width: 360px; margin: 12vh auto; }
+.login .kaart { padding: 24px; }
+.viga-tekst { color: var(--kulu); margin-top: 8px; }
+
+.riba { height: 6px; background: var(--pind2); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+.riba > div { height: 100%; background: var(--kulu); }
+
+@media (max-width: 760px) {
+  .reaTabel thead { display: none; }
+  .reaTabel tbody tr { display: grid; grid-template-columns: 1fr 1fr auto; gap: 4px; margin-bottom: 10px; }
+  .reaTabel td { width: auto !important; min-width: 0 !important; }
+  .reaTabel td:nth-child(1) { grid-column: 1 / -1; }
+  .reaTabel td:nth-child(4) { order: 5; grid-column: 1 / -1; }
+}
