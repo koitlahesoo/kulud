@@ -53,7 +53,7 @@ function nihutaKuu(kuu, n) {
 
 function arv(s) {
   if (s == null) return null;
-  const t = String(s).replace(/\s/g, '').replace(',', '.');
+  const t = String(s).replace(/\s/g, '').replace(/\u2212/g, '-').replace(',', '.');
   if (t === '') return null;
   const n = Number(t);
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
@@ -606,7 +606,9 @@ function tehinguDialoog(t) {
   const olek = h('select', {}, OLEKU_VALIK.map(([i, o]) => h('option', { value: i, selected: i === (t?.olek ?? 0) }, o)));
   const kommentaar = h('input', { value: t?.kommentaar ?? '' });
 
-  // Kulu/tulu: üks konto ja mitu liigiga rida
+  // Kulu/tulu: üks konto ja mitu liigiga rida. Summa sisestatakse tehingu
+  // suunas positiivsena; miinusega rida (nt taara tagastus ostu sees) on vastupidine.
+  const markKT = () => (tyyp === 'tulu' ? 1 : -1);
   const kontoKT = kontoValik(read[0]?.konto_id ?? viimaneKonto);
   const ktRead = [];
   const ktTbody = h('tbody');
@@ -614,8 +616,8 @@ function tehinguDialoog(t) {
   function lisaKtRida(r = {}) {
     const rida = {
       liik: liigiKombo(r.kululiigi_id ?? null),
-      summa: h('input', { class: 'nr', inputmode: 'decimal', value: r.summa != null ? raha(Math.abs(r.summa)) : '', placeholder: '0,00' }),
-      eeldatav: h('input', { class: 'nr', inputmode: 'decimal', value: r.eeldatav_summa != null ? raha(Math.abs(r.eeldatav_summa)) : '', placeholder: 'eeldatav' }),
+      summa: h('input', { class: 'nr', inputmode: 'decimal', value: r.summa != null ? raha(markKT() * r.summa) : '', placeholder: '0,00' }),
+      eeldatav: h('input', { class: 'nr', inputmode: 'decimal', value: r.eeldatav_summa != null ? raha(markKT() * r.eeldatav_summa) : '', placeholder: 'eeldatav' }),
       kommentaar: h('input', { value: r.kommentaar ?? '', placeholder: 'rea kommentaar' }),
       lisakommentaar: r.lisakommentaar ?? null,
       valine_id: r.valine_id ?? null,
@@ -714,7 +716,7 @@ function tehinguDialoog(t) {
       if (tasuSumma) r.push({ konto_id: Number(kontoVälja.value), summa: -Math.abs(tasuSumma), kululiigi_id: tasuLiik.value || null, valine_id: tasuRida?.valine_id ?? null });
       return r;
     }
-    const mark = tyyp === 'kulu' ? -1 : 1;
+    const mark = markKT();
     const r = ktRead
       .map((x) => ({ x, summa: arv(x.summa.value), eeldatav: arv(x.eeldatav.value) }))
       .filter(({ summa, eeldatav, x }) => summa != null || eeldatav != null || x.liik.value);
@@ -722,8 +724,8 @@ function tehinguDialoog(t) {
     if (r.some(({ summa, eeldatav }) => Number.isNaN(summa) || Number.isNaN(eeldatav))) throw new Error('Summa ei ole arv.');
     return r.map(({ x, summa, eeldatav }) => ({
       konto_id: Number(kontoKT.value),
-      summa: mark * Math.abs(summa ?? 0),
-      eeldatav_summa: eeldatav == null ? null : mark * Math.abs(eeldatav),
+      summa: mark * (summa ?? 0),
+      eeldatav_summa: eeldatav == null ? null : mark * eeldatav,
       kululiigi_id: x.liik.value || null,
       kommentaar: x.kommentaar.value,
       lisakommentaar: x.lisakommentaar,
