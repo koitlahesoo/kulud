@@ -50,14 +50,14 @@ create index ix_kululiigid_grupp on kululiigid (grupp, nimi);
 -- ------------------------------------------------------------
 -- 3. tehingud — tehingu päis
 -- ------------------------------------------------------------
--- olek: 0=kinnitatud, 1=planeeritud, 2=arve saabunud,
---       3=makstud, 4=broneering (krediitkaart)
+-- olek: 0=kinnitatud, 1=planeeritud, 2=arve saabunud, 4=broneering
+--       (3=makstud kaotati 2026-10-29, vt 04_olekud.sql)
 create table tehingud (
     tehing_id    integer    generated always as identity primary key,
     kuupaev      date       not null default current_date,
     koht         text       not null default '',
     kommentaar   text,
-    olek         smallint   not null default 0 check (olek between 0 and 4),
+    olek         smallint   not null default 0 check (olek in (0, 1, 2, 4)),
     allikas      text       not null default 'kasitsi',   -- 'kasitsi' või 'import:swedbank' jne
     lisatud_aeg  timestamptz not null default now(),
     muudetud_aeg timestamptz not null default now()
@@ -106,13 +106,13 @@ create table tasakaalustus (
 -- VAATED
 -- ============================================================
 
--- Kontode hetkesaldo (arvestab ainult olekuid 0 ja 3)
+-- Kontode hetkesaldo (arvestab olekuid 0 ja 4)
 create view v_konto_saldo as
 select
     k.konto_id, k.nimi, k.number, k.pank, k.valuuta, k.konto_tyyp, k.limiit,
     k.alg_saldo,
-    coalesce(sum(r.summa) filter (where t.olek in (0, 3)), 0)              as liikumised,
-    k.alg_saldo + coalesce(sum(r.summa) filter (where t.olek in (0, 3)), 0) as hetke_saldo,
+    coalesce(sum(r.summa) filter (where t.olek in (0, 4)), 0)              as liikumised,
+    k.alg_saldo + coalesce(sum(r.summa) filter (where t.olek in (0, 4)), 0) as hetke_saldo,
     coalesce(sum(coalesce(r.eeldatav_summa, r.summa)) filter (where t.olek in (1, 2)), 0)
                                                                             as planeeritud
 from kontod k
@@ -129,12 +129,12 @@ select
     k.alg_saldo + coalesce((
         select sum(r.summa)
         from tehingu_read r join tehingud t on t.tehing_id = r.tehing_id
-        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek in (0, 3)
+        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek in (0, 4)
     ), 0)                                                      as arvutatud_saldo,
     ts.panga_saldo - (k.alg_saldo + coalesce((
         select sum(r.summa)
         from tehingu_read r join tehingud t on t.tehing_id = r.tehing_id
-        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek in (0, 3)
+        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek in (0, 4)
     ), 0))                                                     as erinevus,
     ts.on_kinnitatud, ts.kommentaar
 from tasakaalustus ts

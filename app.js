@@ -59,8 +59,11 @@ function arv(s) {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : NaN;
 }
 
-const OLEKUD = ['kinnitatud', 'planeeritud', 'arve saabunud', 'makstud', 'broneering'];
-const SALDOSSE = [0, 3];
+// Olek 3 ("makstud") on kasutusest kõrvaldatud; selle asemel on "kinnitatud".
+const OLEKUD = { 0: 'kinnitatud', 1: 'planeeritud', 2: 'arve saabunud', 4: 'broneering' };
+const OLEKU_VALIK = Object.entries(OLEKUD).map(([k, n]) => [Number(k), n]);
+// Saldosse ja kuu kokkuvõttesse lähevad kinnitatud ja broneeringus tehingud
+const SALDOSSE = [0, 4];
 const KONTO_TYYBID = ['sularaha', 'pangakonto', 'krediitkaart', 'kogumiskonto'];
 
 function teade(tekst, viga = false) {
@@ -440,10 +443,20 @@ async function lehtYlevaade() {
         plaanis.length === 0 ? h('div', { class: 'tyhi' }, 'Ootel tehinguid pole.')
           : h('table', {}, h('tbody', {}, plaanis.map((t) => {
             const summa = t.tehingu_read.reduce((s, r) => s + Number(r.eeldatav_summa ?? r.summa), 0);
+            // Kui summa on veel sisestamata (ainult eeldatav), avame kinnitamiseks dialoogi
+            const summaPuudu = t.tehingu_read.some((r) => Number(r.summa) === 0 && r.eeldatav_summa != null);
             return h('tr', { class: 'klikitav', onclick: () => tehinguDialoog(t) },
               h('td', {}, kp(t.kuupaev)),
               h('td', {}, t.koht, ' ', h('span', { class: 'silt' }, OLEKUD[t.olek])),
-              h('td', { class: 'nr' }, rahaEl(summa)));
+              h('td', { class: 'nr' }, rahaEl(summa)),
+              h('td', { style: 'width:1%' }, h('button', { class: 'ikoon', title: 'Märgi kinnitatuks',
+                onclick: async (e) => {
+                  e.stopPropagation();
+                  if (summaPuudu) { tehinguDialoog({ ...t, olek: 0 }); return; }
+                  await paring(sb.from('tehingud').update({ olek: 0, muudetud_aeg: new Date().toISOString() }).eq('tehing_id', t.tehing_id));
+                  teade('Kinnitatud');
+                  lehtYlevaade();
+                } }, '✓')));
           }))))),
   );
 }
@@ -518,7 +531,7 @@ async function lehtTehingud() {
     })()),
     h('div', {}, h('label', {}, 'Olek'), (() => {
       const s = h('select', {}, h('option', { value: '' }, 'kõik'),
-        OLEKUD.map((o, i) => h('option', { value: i, selected: String(i) === tehinguFilter.olek }, o)));
+        OLEKU_VALIK.map(([i, o]) => h('option', { value: i, selected: String(i) === tehinguFilter.olek }, o)));
       s.onchange = () => { tehinguFilter.olek = s.value; joonista(); };
       return s;
     })()));
@@ -552,7 +565,7 @@ function tehinguDialoog(t) {
 
   const kuupaev = kuupaevaVali(t?.kuupaev ?? tana(), { required: true });
   const koht = h('input', { value: t?.koht ?? '', placeholder: 'nt Rimi, palk, üür' });
-  const olek = h('select', {}, OLEKUD.map((o, i) => h('option', { value: i, selected: i === (t?.olek ?? 0) }, o)));
+  const olek = h('select', {}, OLEKU_VALIK.map(([i, o]) => h('option', { value: i, selected: i === (t?.olek ?? 0) }, o)));
   const kommentaar = h('input', { value: t?.kommentaar ?? '' });
 
   // Kulu/tulu: üks konto ja mitu liigiga rida
