@@ -93,7 +93,7 @@ const kululiigiNimi = (id) => {
 async function laeYldandmed() {
   const [kontod, kululiigid] = await Promise.all([
     paring(sb.from('kontod').select('*').order('jrk').order('nimi')),
-    paring(sb.from('kululiigid').select('*').order('grupp').order('nimi')),
+    paring(sb.from('kululiigid').select('*').order('grupp').order('kululiigi_id')),
   ]);
   vahemalu.kontod = kontod;
   vahemalu.kululiigid = kululiigid;
@@ -227,11 +227,12 @@ async function lehtYlevaade() {
       const kl = kululiik(r.kululiigi_id);
       const g = (grupid[kl?.grupp || '(grupita)'] ??= { summa: 0, liigid: {} });
       g.summa += Number(r.summa);
-      g.liigid[kl?.nimi || '?'] = (g.liigid[kl?.nimi || '?'] || 0) + Number(r.summa);
+      const l = (g.liigid[r.kululiigi_id] ??= { nimi: kl?.nimi || '?', summa: 0 });
+      l.summa += Number(r.summa);
     }
   }
-  const kuluGrupid = Object.entries(grupid).filter(([, g]) => g.summa < 0).sort((a, b) => a[1].summa - b[1].summa);
-  const tuluGrupid = Object.entries(grupid).filter(([, g]) => g.summa >= 0).sort((a, b) => b[1].summa - a[1].summa);
+  const kuluGrupid = Object.entries(grupid).filter(([, g]) => g.summa < 0).sort((a, b) => a[0].localeCompare(b[0], 'et'));
+  const tuluGrupid = Object.entries(grupid).filter(([, g]) => g.summa >= 0).sort((a, b) => a[0].localeCompare(b[0], 'et'));
   const kuludKokku = kuluGrupid.reduce((s, [, g]) => s + g.summa, 0);
   const tuludKokku = tuluGrupid.reduce((s, [, g]) => s + g.summa, 0);
   const suurim = Math.max(1, ...kuluGrupid.map(([, g]) => -g.summa));
@@ -246,7 +247,7 @@ async function lehtYlevaade() {
             h('div', { class: 'riba' }, h('div', { style: `width:${(-g.summa / suurim) * 100}%` }))),
           h('td', { class: 'nr' }, rahaEl(g.summa))),
         ...(lahti.has(nimi)
-          ? Object.entries(g.liigid).sort((a, b) => a[1] - b[1]).map(([ln, s]) =>
+          ? Object.entries(g.liigid).sort((a, b) => a[0] - b[0]).map(([, { nimi: ln, summa: s }]) =>
             h('tr', {}, h('td', { class: 'hall', style: 'padding-left:28px' }, ln), h('td', { class: 'nr hall' }, raha(s))))
           : []),
       ]),
