@@ -117,7 +117,155 @@ function kululiigiValik(valitud, tyhiTekst = '— vali —') {
     h('option', { value: '' }, tyhiTekst),
     Object.entries(grupid).map(([g, liigid]) =>
       h('optgroup', { label: g },
-        liigid.map((k) => h('option', { value: k.kululiigi_id, selected: k.kululiigi_id === valitud }, k.nimi)))));
+        liigid.map((k) => h('option', { value: k.kululiigi_id, selected: k.kululiigi_id === valitud }, `${k.kululiigi_id} ${k.nimi}`)))));
+}
+
+// Kululiigi valik klaviatuurilt: number viib grupi (nt 2 → "02 ALKOHOL")
+// või ID-ni (nt 203), tekst otsib nime ja grupi järgi.
+function liigiKombo(valitud) {
+  let val = valitud ?? null;
+  let tabamused = [];
+  let aktiivne = 0;
+  const silt = (id) => {
+    const k = kululiik(id);
+    return k ? `${k.kululiigi_id} ${k.nimi}` : '';
+  };
+  const grupiNr = (g) => Number((g.match(/^\d+/) || [])[0]);
+  const sisend = h('input', { autocomplete: 'off', placeholder: 'nr või nimi', value: silt(val) });
+  const loend = h('div', { class: 'kombo-loend', hidden: true });
+  const umbris = h('div', { class: 'kombo' }, sisend, loend);
+
+  function otsi(q) {
+    q = q.trim().toLowerCase();
+    const liigid = vahemalu.kululiigid.filter((k) => k.aktiivne || k.kululiigi_id === val);
+    if (!q) return liigid;
+    if (/^\d+$/.test(q)) {
+      const n = Number(q);
+      return [...new Set([
+        ...liigid.filter((k) => k.kululiigi_id === n),
+        ...liigid.filter((k) => grupiNr(k.grupp) === n),
+        ...liigid.filter((k) => String(k.kululiigi_id).startsWith(q)),
+      ])];
+    }
+    return liigid.filter((k) => `${k.nimi} ${k.grupp}`.toLowerCase().includes(q));
+  }
+
+  function joonista() {
+    let eelmineGrupp = null;
+    loend.replaceChildren(...tabamused.flatMap((k, i) => {
+      const read = [];
+      if (k.grupp !== eelmineGrupp) read.push(h('div', { class: 'kombo-grupp' }, k.grupp));
+      eelmineGrupp = k.grupp;
+      read.push(h('div', {
+        class: 'kombo-rida' + (i === aktiivne ? ' aktiivne' : ''),
+        onmousedown: (e) => { e.preventDefault(); vali(k.kululiigi_id); },
+      }, h('span', { class: 'hall' }, k.kululiigi_id), ' ', k.nimi));
+      return read;
+    }));
+    if (tabamused.length === 0) loend.append(h('div', { class: 'kombo-grupp' }, 'ei leitud'));
+    loend.querySelector('.aktiivne')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function ava(q) {
+    tabamused = otsi(q);
+    aktiivne = q ? 0 : Math.max(0, tabamused.findIndex((k) => k.kululiigi_id === val));
+    loend.hidden = false;
+    // fixed-positsioon, et dialoogi kerimisala loendit ära ei lõikaks
+    const r = sisend.getBoundingClientRect();
+    const all = window.innerHeight - r.bottom - 8;
+    loend.style.left = r.left + 'px';
+    loend.style.minWidth = r.width + 'px';
+    loend.style.maxHeight = Math.min(320, Math.max(all, r.top - 8)) + 'px';
+    if (all >= 200 || all >= r.top) { loend.style.top = r.bottom + 2 + 'px'; loend.style.bottom = ''; }
+    else { loend.style.bottom = window.innerHeight - r.top + 2 + 'px'; loend.style.top = ''; }
+    joonista();
+  }
+  const sulge = () => { loend.hidden = true; };
+
+  function vali(id) {
+    val = id;
+    sisend.value = silt(val);
+    sulge();
+    umbris.dispatchEvent(new Event('change'));
+  }
+
+  sisend.addEventListener('focus', () => { sisend.select(); ava(''); });
+  sisend.addEventListener('input', () => ava(sisend.value));
+  sisend.addEventListener('keydown', (e) => {
+    if (loend.hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      aktiivne = Math.min(tabamused.length - 1, Math.max(0, aktiivne + (e.key === 'ArrowDown' ? 1 : -1)));
+      joonista();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (tabamused[aktiivne]) vali(tabamused[aktiivne].kululiigi_id);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      sisend.value = silt(val);
+      sulge();
+    }
+  });
+  sisend.addEventListener('blur', () => {
+    if (loend.hidden) return;
+    const tekst = sisend.value.trim();
+    if (!tekst) vali(null);
+    else if (tekst !== silt(val) && tabamused[aktiivne]) vali(tabamused[aktiivne].kululiigi_id);
+    else { sisend.value = silt(val); sulge(); }
+  });
+
+  Object.defineProperty(umbris, 'value', {
+    get: () => (val == null ? '' : String(val)),
+    set: (v) => { val = v ? Number(v) : null; sisend.value = silt(val); },
+  });
+  umbris.focus = () => sisend.focus();
+  return umbris;
+}
+
+// Kuupäev kujul pp.kk.aaaa. Lubab ka lühendeid: "29" (selle kuu 29.),
+// "29.10", "29.10.26" ja ISO kuju "2026-10-29". value annab ISO kuupäeva.
+function loeKuupaev(tekst) {
+  const t = tekst.trim();
+  if (!t) return '';
+  let p, k, a;
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) [, a, k, p] = m.map(Number);
+  else {
+    m = t.match(/^(\d{1,2})(?:[.\/-](\d{1,2})(?:[.\/-](\d{2}|\d{4})?)?)?\.?$/);
+    if (!m) return null;
+    const praegu = new Date();
+    p = Number(m[1]);
+    k = m[2] ? Number(m[2]) : praegu.getMonth() + 1;
+    a = m[3] ? Number(m[3]) : praegu.getFullYear();
+    if (a < 100) a += 2000;
+  }
+  const d = new Date(a, k - 1, p);
+  if (d.getFullYear() !== a || d.getMonth() !== k - 1 || d.getDate() !== p) return null;
+  return `${a}-${String(k).padStart(2, '0')}-${String(p).padStart(2, '0')}`;
+}
+
+function kuupaevaVali(iso = '', { required = false } = {}) {
+  let val = iso || '';
+  const sisend = h('input', { value: kp(val), placeholder: 'pp.kk.aaaa', inputmode: 'numeric', required });
+  const valija = h('input', { type: 'date', tabindex: '-1', class: 'peidetud-valija', value: val });
+  const nupp = h('button', { type: 'button', class: 'ikoon', tabindex: '-1', title: 'Kalender',
+    onclick: () => { valija.value = val; try { valija.showPicker(); } catch { valija.focus(); } } }, '📅');
+  valija.addEventListener('change', () => { if (valija.value) { val = valija.value; sisend.value = kp(val); sisend.classList.remove('vigane'); } });
+  sisend.addEventListener('blur', () => {
+    const v = loeKuupaev(sisend.value);
+    if (v === null) { sisend.classList.add('vigane'); return; }
+    sisend.classList.remove('vigane');
+    val = v;
+    sisend.value = kp(val);
+  });
+  const umbris = h('div', { class: 'kuupaev' }, sisend, nupp, valija);
+  Object.defineProperty(umbris, 'value', {
+    // null = kuupäev on sisestatud, aga vigane
+    get: () => { const v = loeKuupaev(sisend.value); return v === null ? null : v; },
+  });
+  umbris.focus = () => sisend.focus();
+  return umbris;
 }
 
 // Kas tehingu rida on ülekande osa: liigita rida, mille vastas on
@@ -194,7 +342,12 @@ function pais(pealkiri, ...lisad) {
 function kuuValija(kuu, muuda) {
   return h('div', { class: 'nupud' },
     h('button', { class: 'ikoon', title: 'Eelmine kuu', onclick: () => muuda(nihutaKuu(kuu, -1)) }, '‹'),
-    h('input', { type: 'month', value: kuu, style: 'width:auto', onchange: (e) => e.target.value && muuda(e.target.value) }),
+    (() => {
+      const valija = h('input', { type: 'month', tabindex: '-1', class: 'peidetud-valija', value: kuu,
+        onchange: (e) => e.target.value && muuda(e.target.value) });
+      return h('button', { class: 'kuu-nupp', title: 'Vali kuu',
+        onclick: () => { try { valija.showPicker(); } catch { valija.focus(); } } }, kuuNimi(kuu), valija);
+    })(),
     h('button', { class: 'ikoon', title: 'Järgmine kuu', onclick: () => muuda(nihutaKuu(kuu, 1)) }, '›'));
 }
 
@@ -397,7 +550,7 @@ function tehinguDialoog(t) {
   let tyyp = t ? tehinguTyyp(t) : 'kulu';
   const viimaneKonto = Number(localStorage.getItem('kulud.viimaneKonto')) || vahemalu.kontod.find((k) => k.aktiivne)?.konto_id;
 
-  const kuupaev = h('input', { type: 'date', value: t?.kuupaev ?? tana(), required: true });
+  const kuupaev = kuupaevaVali(t?.kuupaev ?? tana(), { required: true });
   const koht = h('input', { value: t?.koht ?? '', placeholder: 'nt Rimi, palk, üür' });
   const olek = h('select', {}, OLEKUD.map((o, i) => h('option', { value: i, selected: i === (t?.olek ?? 0) }, o)));
   const kommentaar = h('input', { value: t?.kommentaar ?? '' });
@@ -409,7 +562,7 @@ function tehinguDialoog(t) {
   const ktKokku = h('span');
   function lisaKtRida(r = {}) {
     const rida = {
-      liik: kululiigiValik(r.kululiigi_id ?? null),
+      liik: liigiKombo(r.kululiigi_id ?? null),
       summa: h('input', { class: 'nr', inputmode: 'decimal', value: r.summa != null ? raha(Math.abs(r.summa)) : '', placeholder: '0,00' }),
       eeldatav: h('input', { class: 'nr', inputmode: 'decimal', value: r.eeldatav_summa != null ? raha(Math.abs(r.eeldatav_summa)) : '', placeholder: 'eeldatav' }),
       kommentaar: h('input', { value: r.kommentaar ?? '', placeholder: 'rea kommentaar' }),
@@ -451,7 +604,7 @@ function tehinguDialoog(t) {
   const ulSumma = h('input', { class: 'nr', inputmode: 'decimal', value: ulVälja ? raha(-ulVälja.summa) : '', placeholder: '0,00' });
   const ulSaabus = h('input', { class: 'nr', inputmode: 'decimal', value: ulSisse && ulVälja && Number(ulSisse.summa) !== -Number(ulVälja.summa) ? raha(ulSisse.summa) : '', placeholder: 'sama' });
   const tasu = h('input', { class: 'nr', inputmode: 'decimal', value: tasuRida ? raha(-tasuRida.summa) : '', placeholder: '0,00' });
-  const tasuLiik = kululiigiValik(tasuRida?.kululiigi_id ?? null);
+  const tasuLiik = liigiKombo(tasuRida?.kululiigi_id ?? null);
   const ulOsa = h('div', {},
     h('div', { class: 'read' },
       h('div', {}, h('label', {}, 'Kontolt'), kontoVälja),
@@ -515,6 +668,7 @@ function tehinguDialoog(t) {
   async function salvesta(e, uusPeale = false) {
     e.preventDefault();
     vigaEl.textContent = '';
+    if (!kuupaev.value) { vigaEl.textContent = 'Kuupäev on vale (kuju pp.kk.aaaa).'; kuupaev.focus(); return; }
     let tRead;
     try { tRead = koostaRead(); } catch (err) { vigaEl.textContent = err.message; return; }
     await paring(sb.rpc('salvesta_tehing', {
@@ -601,7 +755,7 @@ function kontoDialoog(k) {
     valuuta: h('input', { value: k?.valuuta ?? 'EUR', maxlength: 3, required: true }),
     jrk: h('input', { type: 'number', value: k?.jrk ?? (vahemalu.kontod.length + 1) }),
     alg_saldo: h('input', { class: 'nr', inputmode: 'decimal', value: raha(k?.alg_saldo ?? 0) }),
-    alg_kuupaev: h('input', { type: 'date', value: k?.alg_kuupaev ?? '' }),
+    alg_kuupaev: kuupaevaVali(k?.alg_kuupaev ?? ''),
     limiit: h('input', { class: 'nr', inputmode: 'decimal', value: k?.limiit != null ? raha(k.limiit) : '' }),
     aktiivne: h('input', { type: 'checkbox', checked: k ? k.aktiivne : true, style: 'width:auto' }),
   };
@@ -613,6 +767,7 @@ function kontoDialoog(k) {
       const alg = arv(v.alg_saldo.value) ?? 0;
       const limiit = arv(v.limiit.value);
       if (Number.isNaN(alg) || Number.isNaN(limiit)) { vigaEl.textContent = 'Summa ei ole arv.'; return; }
+      if (v.alg_kuupaev.value === null) { vigaEl.textContent = 'Algsaldo kuupäev on vale (kuju pp.kk.aaaa).'; return; }
       const rida = {
         nimi: v.nimi.value.trim(), pank: v.pank.value.trim() || null, number: v.number.value.trim() || null,
         konto_tyyp: Number(v.konto_tyyp.value), valuuta: v.valuuta.value.trim().toUpperCase(),
@@ -715,7 +870,7 @@ async function lehtTasakaalustus() {
     .order('kuupaev', { ascending: false }).order('konto_nimi'));
 
   const konto = kontoValik(null);
-  const kuupaev = h('input', { type: 'date', value: tana(), required: true });
+  const kuupaev = kuupaevaVali(tana(), { required: true });
   const saldo = h('input', { class: 'nr', inputmode: 'decimal', required: true, placeholder: '0,00' });
   const kommentaar = h('input');
   const vigaEl = h('div', { class: 'viga-tekst' });
@@ -724,6 +879,7 @@ async function lehtTasakaalustus() {
       e.preventDefault();
       const s = arv(saldo.value);
       if (s == null || Number.isNaN(s)) { vigaEl.textContent = 'Sisesta panga saldo.'; return; }
+      if (!kuupaev.value) { vigaEl.textContent = 'Kuupäev on vale (kuju pp.kk.aaaa).'; return; }
       await paring(sb.from('tasakaalustus').upsert(
         { konto_id: Number(konto.value), kuupaev: kuupaev.value, panga_saldo: s, kommentaar: kommentaar.value.trim() || null },
         { onConflict: 'konto_id,kuupaev' }));

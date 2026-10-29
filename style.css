@@ -160,3 +160,24 @@ dialog h2 { margin-bottom: 16px; }
   .reaTabel td:nth-child(1) { grid-column: 1 / -1; }
   .reaTabel td:nth-child(4) { order: 5; grid-column: 1 / -1; }
 }
+
+/* Kululiigi valik */
+.kombo { position: relative; }
+.kombo-loend {
+  position: fixed; z-index: 20;
+  width: max-content; max-width: 340px; overflow-y: auto;
+  background: var(--pind); border: 1px solid var(--joon); border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / .18); padding: 4px 0;
+}
+.kombo-grupp { padding: 6px 10px 2px; font-size: 11px; font-weight: 600; color: var(--hall); text-transform: uppercase; }
+.kombo-rida { padding: 5px 10px 5px 16px; cursor: pointer; white-space: nowrap; }
+.kombo-rida:hover { background: var(--pind2); }
+.kombo-rida.aktiivne { background: var(--aktsent); color: #fff; }
+.kombo-rida.aktiivne .hall { color: #fff; }
+
+/* Kuupäev */
+.kuupaev { display: flex; gap: 4px; position: relative; }
+.kuupaev input:not(.peidetud-valija) { min-width: 0; }
+.peidetud-valija { position: absolute; width: 1px !important; height: 1px; padding: 0 !important; border: 0 !important; opacity: 0; pointer-events: none; bottom: 0; right: 0; }
+input.vigane { border-color: var(--kulu); outline-color: var(--kulu); }
+.kuu-nupp { position: relative; min-width: 150px; }
