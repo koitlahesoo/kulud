@@ -85,7 +85,7 @@ async function paring(p) {
 // Andmed, mida läheb igal pool vaja
 // ------------------------------------------------------------
 
-const vahemalu = { kontod: [], kululiigid: [], kohad: new Map() };
+const vahemalu = { kontod: [], kululiigid: [], kohad: new Map(), pangaNimed: new Map() };
 const kontoNimi = (id) => vahemalu.kontod.find((k) => k.konto_id === id)?.nimi ?? '?';
 const kululiik = (id) => vahemalu.kululiigid.find((k) => k.kululiigi_id === id);
 const kululiigiNimi = (id) => {
@@ -107,16 +107,23 @@ async function laeYldandmed() {
 // tehingut saaks sama koha järgi eeltäita.
 async function laeKohad() {
   const tehingud = await paring(sb.from('tehingud')
-    .select('tehing_id, koht, kuupaev, tehingu_read(konto_id, kululiigi_id, summa, rida)')
+    .select('tehing_id, koht, kuupaev, tehingu_read(konto_id, kululiigi_id, summa, rida, lisakommentaar)')
     .neq('koht', '')
     .order('kuupaev', { ascending: false }).order('tehing_id', { ascending: false })
     .limit(5000));
   const kohad = new Map();
+  const pangaNimed = new Map();
   for (const t of tehingud) {
     const voti = t.koht.trim().toLowerCase();
     if (voti && !kohad.has(voti)) kohad.set(voti, t);
+    // Impordil jäetakse panga nimi meelde, et järgmine kord sama nime ära tunda
+    for (const rida of t.tehingu_read) {
+      const m = rida.lisakommentaar?.match(/^Pangas: (.+)$/);
+      if (m && !pangaNimed.has(m[1].toLowerCase())) pangaNimed.set(m[1].toLowerCase(), t);
+    }
   }
   vahemalu.kohad = kohad;
+  vahemalu.pangaNimed = pangaNimed;
 }
 
 function kontoValik(valitud, { koigis = false, tyhi = false } = {}) {
@@ -210,6 +217,7 @@ function liigiKombo(valitud) {
   }
 
   sisend.addEventListener('focus', () => { sisend.select(); ava(''); });
+  window.addEventListener('scroll', (e) => { if (!loend.hidden && !loend.contains(e.target)) sulge(); }, true);
   sisend.addEventListener('input', () => ava(sisend.value));
   sisend.addEventListener('keydown', (e) => {
     if (loend.hidden) return;
@@ -335,6 +343,7 @@ const LEHED = {
   kontod: { nimi: 'Kontod', f: lehtKontod },
   kululiigid: { nimi: 'Kululiigid', f: lehtKululiigid },
   tasakaalustus: { nimi: 'Tasakaalustus', f: lehtTasakaalustus },
+  import: { nimi: 'Import', f: lehtImport },
 };
 
 let sisu;
@@ -507,7 +516,8 @@ async function lehtTehingud() {
     const otsing = f.otsing.trim().toLowerCase();
     const naha = koik.filter((t) =>
       (!f.konto || t.tehingu_read.some((r) => r.konto_id === Number(f.konto))) &&
-      (!f.kululiik || t.tehingu_read.some((r) => r.kululiigi_id === Number(f.kululiik))) &&
+      (!f.kululiik || (f.kululiik === '-' ? tehinguTyyp(t) !== 'ulekanne' && t.tehingu_read.some((r) => r.kululiigi_id == null)
+        : t.tehingu_read.some((r) => r.kululiigi_id === Number(f.kululiik)))) &&
       (f.olek === '' || t.olek === Number(f.olek)) &&
       (!otsing || [t.koht, t.kommentaar, ...t.tehingu_read.flatMap((r) => [r.kommentaar, r.lisakommentaar, kululiigiNimi(r.kululiigi_id)])]
         .some((s) => s && s.toLowerCase().includes(otsing))));
@@ -552,6 +562,7 @@ async function lehtTehingud() {
     })()),
     h('div', {}, h('label', {}, 'Kululiik'), (() => {
       const s = kululiigiValik(Number(tehinguFilter.kululiik) || null, 'kõik liigid');
+      s.options[0].after(h('option', { value: '-', selected: tehinguFilter.kululiik === '-' }, 'liigitamata'));
       s.onchange = () => { tehinguFilter.kululiik = s.value; joonista(); };
       return s;
     })()),
@@ -1001,6 +1012,266 @@ async function lehtTasakaalustus() {
                 } }, '×')));
         }),
         punktid.length === 0 && h('tr', {}, h('td', { colspan: 7, class: 'tyhi' }, 'Kontrollpunkte pole veel.')))))));
+}
+
+// ------------------------------------------------------------
+// Pangaväljavõtte import
+// ------------------------------------------------------------
+
+function parsiCsv(tekst, eraldaja = ';') {
+  const read = [];
+  let rida = [];
+  let vali = '';
+  let jutumargis = false;
+  for (let i = 0; i < tekst.length; i++) {
+    const c = tekst[i];
+    if (jutumargis) {
+      if (c === '"' && tekst[i + 1] === '"') { vali += '"'; i++; }
+      else if (c === '"') jutumargis = false;
+      else vali += c;
+    } else if (c === '"') jutumargis = true;
+    else if (c === eraldaja) { rida.push(vali); vali = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && tekst[i + 1] === '\n') i++;
+      rida.push(vali); vali = '';
+      if (rida.some((x) => x !== '')) read.push(rida);
+      rida = [];
+    } else vali += c;
+  }
+  rida.push(vali);
+  if (rida.some((x) => x !== '')) read.push(rida);
+  return read;
+}
+
+async function loeFailiTekst(fail) {
+  const baidid = await fail.arrayBuffer();
+  const utf8 = new TextDecoder('utf-8').decode(baidid);
+  // Vanemad ekspordid võivad olla Windowsi kodeeringus
+  return utf8.includes('�') ? new TextDecoder('windows-1257').decode(baidid) : utf8;
+}
+
+// Kaardimaksete saaja on kujul "PRISMA TARTU ANNELINN  50708 TARTUVIRO" või
+// "MCDONALDS TARTU\TURU 6A\..." – jätame alles ainult nime.
+function puhastaKoht(saaja, selgitus) {
+  let s = (saaja || selgitus || '').replace(/^'/, '');
+  s = s.split('\\')[0];
+  s = s.replace(/\s+\d{5}\s+\S.*$/, '');
+  return s.replace(/\s{2,}/g, ' ').trim();
+}
+
+function swedbankRead(tabel) {
+  const pais = tabel[0].map((x) => x.trim());
+  const veerg = (nimi) => pais.indexOf(nimi);
+  const v = {
+    konto: veerg('Kliendi konto'), tyyp: veerg('Reatüüp'), kp: veerg('Kuupäev'), saaja: veerg('Saaja/Maksja'),
+    selgitus: veerg('Selgitus'), summa: veerg('Summa'), valuuta: veerg('Valuuta'), dk: veerg('Deebet/Kreedit'),
+    arhiiv: veerg('Arhiveerimistunnus'), tehinguTyyp: veerg('Tehingu tüüp'),
+  };
+  if (v.konto < 0 || v.tyyp < 0 || v.summa < 0) return null;
+  const tulemus = { iban: '', tehingud: [], loppsaldo: null };
+  for (const rida of tabel.slice(1)) {
+    const tyyp = rida[v.tyyp];
+    tulemus.iban ||= rida[v.konto];
+    const kuupaev = loeKuupaev(rida[v.kp] || '');
+    const summa = arv(rida[v.summa]);
+    if (tyyp === '86' && kuupaev && summa != null && !Number.isNaN(summa)) {
+      tulemus.loppsaldo = { kuupaev, summa: rida[v.dk] === 'D' ? -summa : summa };
+    }
+    if (tyyp !== '20' || !kuupaev || summa == null || Number.isNaN(summa)) continue;
+    const selgitus = (rida[v.selgitus] || '').replace(/^'/, '').trim();
+    const kaardimakse = /^\d{6}\*+\d{4}\s+(\d\d\.\d\d\.\d\d)/.exec(selgitus);
+    tulemus.tehingud.push({
+      kuupaev,
+      summa: rida[v.dk] === 'D' ? -summa : summa,
+      valuuta: rida[v.valuuta] || 'EUR',
+      pangaKoht: puhastaKoht(rida[v.saaja], selgitus),
+      kommentaar: kaardimakse ? 'kaart ' + kaardimakse[1] : (selgitus === '.' ? '' : selgitus),
+      valine_id: rida[v.arhiiv] || null,
+    });
+  }
+  return tulemus;
+}
+
+const normIban = (s) => (s || '').replace(/\s/g, '').toUpperCase();
+
+async function lehtImport() {
+  const failiValik = h('input', { type: 'file', accept: '.csv,text/csv', style: 'width:auto' });
+  const tulemusEl = h('div');
+  failiValik.addEventListener('change', async () => {
+    const fail = failiValik.files[0];
+    if (!fail) return;
+    const tabel = parsiCsv(await loeFailiTekst(fail));
+    const andmed = tabel.length ? swedbankRead(tabel) : null;
+    if (!andmed) {
+      tulemusEl.replaceChildren(h('p', { class: 'viga-tekst' }, 'Faili ei tuntud ära. Praegu oskan lugeda Swedbanki CSV-väljavõtet.'));
+      return;
+    }
+    await naitaImporti(andmed, tulemusEl);
+  });
+  sisu.replaceChildren(
+    pais('Import'),
+    h('div', { class: 'kaart' },
+      h('p', { style: 'margin-top:0' }, 'Vali panga CSV-väljavõte. Enne salvestamist näed kõik tehingud üle ja saad koha, kommentaari ja kululiigi parandada.'),
+      failiValik),
+    tulemusEl);
+}
+
+async function naitaImporti(andmed, tulemusEl) {
+  const kontoSelect = kontoValik(
+    vahemalu.kontod.find((k) => normIban(k.number) === normIban(andmed.iban))?.konto_id ?? null,
+    { tyhi: '— vali konto —' });
+  const ridadeKoht = h('div');
+
+  async function koosta() {
+    const kontoId = Number(kontoSelect.value);
+    if (!kontoId) { ridadeKoht.replaceChildren(h('p', { class: 'hall' }, 'Vali, millise konto väljavõte see on.')); return; }
+    const kuupaevad = andmed.tehingud.map((x) => x.kuupaev).sort();
+    const algus = new Date(kuupaevad[0]); algus.setDate(algus.getDate() - 7);
+    const lopp = new Date(kuupaevad.at(-1)); lopp.setDate(lopp.getDate() + 7);
+    const olemas = await paring(sb.from('tehingud').select('*, tehingu_read(*)')
+      .gte('kuupaev', algus.toLocaleDateString('sv-SE')).lte('kuupaev', lopp.toLocaleDateString('sv-SE')));
+    const olemasIdd = new Set(olemas.flatMap((t) => t.tehingu_read.filter((r) => r.konto_id === kontoId && r.valine_id).map((r) => r.valine_id)));
+    const kasutatud = new Set();
+    const krediitkaart = vahemalu.kontod.find((k) => k.konto_tyyp === 2 && k.aktiivne && k.konto_id !== kontoId);
+
+    const read = andmed.tehingud.map((x) => {
+      const rida = { ...x, olek: 'uus' };
+      if (x.valine_id && olemasIdd.has(x.valine_id)) { rida.olek = 'olemas'; return rida; }
+      // Käsitsi sisestatud (nt broneering) tehing sama konto ja summaga mõne päeva kaugusel
+      const paev = 86400000;
+      const kandidaadid = olemas
+        .filter((t) => !kasutatud.has(t.tehing_id))
+        .map((t) => ({ t, kontoRead: t.tehingu_read.filter((r) => r.konto_id === kontoId) }))
+        .filter(({ kontoRead }) => kontoRead.length && kontoRead.every((r) => !r.valine_id) &&
+          Math.abs(kontoRead.reduce((s, r) => s + Number(r.summa), 0) - x.summa) < 0.005)
+        .map((k) => ({ ...k, vahe: Math.abs(new Date(k.t.kuupaev) - new Date(x.kuupaev)) / paev }))
+        .filter((k) => k.vahe <= 5)
+        .sort((a, b) => a.vahe - b.vahe);
+      if (kandidaadid.length) {
+        rida.olek = 'seo';
+        rida.seo = kandidaadid[0];
+        kasutatud.add(kandidaadid[0].t.tehing_id);
+        return rida;
+      }
+      // Soovitus varasemate tehingute põhjal
+      const eelmine = vahemalu.pangaNimed.get(x.pangaKoht.toLowerCase()) || vahemalu.kohad.get(x.pangaKoht.toLowerCase());
+      rida.koht = eelmine?.koht ?? x.pangaKoht;
+      if (eelmine) {
+        const eRead = eelmine.tehingu_read;
+        const ul = ulekandeRead(eRead);
+        if (ul.size >= 2) rida.sihtkonto = [...ul].find((r) => r.konto_id !== kontoId)?.konto_id ?? null;
+        else rida.kululiik = eRead.find((r) => r.kululiigi_id != null)?.kululiigi_id ?? null;
+      }
+      if (!eelmine && krediitkaart && /krediidi tagasimakse/i.test(x.kommentaar)) rida.sihtkonto = krediitkaart.konto_id;
+      return rida;
+    });
+
+    const valitud = read.map((x) => x.olek !== 'olemas');
+    const vaated = read.map((x, i) => {
+      const linnuke = h('input', { type: 'checkbox', style: 'width:auto', checked: valitud[i], disabled: x.olek === 'olemas',
+        onchange: (e) => { valitud[i] = e.target.checked; arvuta(); } });
+      if (x.olek !== 'uus') {
+        return {
+          tr: h('tr', { class: x.olek === 'olemas' ? 'hall' : '' },
+            h('td', {}, linnuke), h('td', {}, kp(x.kuupaev)),
+            h('td', {}, x.olek === 'olemas' ? x.pangaKoht : x.seo.t.koht || x.pangaKoht),
+            h('td', { class: 'hall' }, x.kommentaar),
+            h('td', { class: 'nr' }, rahaEl(x.summa)),
+            h('td', { colspan: 2 }, x.olek === 'olemas'
+              ? h('span', { class: 'silt' }, 'juba imporditud')
+              : h('span', { class: 'silt hoiatus' }, `seotakse ${kp(x.seo.t.kuupaev)} tehinguga` + (x.seo.t.olek !== 0 ? ', märgitakse kinnitatuks' : '')))),
+        };
+      }
+      const koht = h('input', { value: x.koht });
+      const kommentaar = h('input', { value: x.kommentaar });
+      const liik = liigiKombo(x.kululiik ?? null);
+      const siht = h('select', {},
+        h('option', { value: '' }, 'kulu / tulu'),
+        vahemalu.kontod.filter((k) => k.aktiivne && k.konto_id !== kontoId)
+          .map((k) => h('option', { value: k.konto_id, selected: k.konto_id === x.sihtkonto }, 'ülekanne: ' + k.nimi)));
+      const naitaLiiki = () => { liik.style.display = siht.value ? 'none' : ''; };
+      siht.addEventListener('change', naitaLiiki);
+      naitaLiiki();
+      return {
+        koht, kommentaar, liik, siht,
+        tr: h('tr', {},
+          h('td', {}, linnuke), h('td', { style: 'white-space:nowrap' }, kp(x.kuupaev)),
+          h('td', { style: 'min-width:160px' }, koht), h('td', { style: 'min-width:160px' }, kommentaar),
+          h('td', { class: 'nr' }, rahaEl(x.summa)),
+          h('td', { style: 'width:150px' }, siht), h('td', { style: 'min-width:180px' }, liik)),
+      };
+    });
+
+    const kokkuEl = h('span', { class: 'hall' });
+    function arvuta() {
+      const n = valitud.filter(Boolean).length;
+      kokkuEl.textContent = `Valitud ${n} rida ${read.length}-st` +
+        (read.some((x) => x.olek === 'olemas') ? ` (${read.filter((x) => x.olek === 'olemas').length} juba olemas)` : '');
+    }
+    arvuta();
+
+    const loppsaldoLinnuke = andmed.loppsaldo && h('input', { type: 'checkbox', checked: true, style: 'width:auto' });
+    const vigaEl = h('div', { class: 'viga-tekst' });
+    const nupp = h('button', { class: 'pohi', onclick: impordi }, 'Impordi valitud');
+
+    async function impordi() {
+      vigaEl.textContent = '';
+      nupp.disabled = true;
+      let tehtud = 0;
+      try {
+        for (const [i, x] of read.entries()) {
+          if (!valitud[i] || x.olek === 'olemas') continue;
+          if (x.olek === 'seo') {
+            const esimene = [...x.seo.kontoRead].sort((a, b) => a.rida - b.rida)[0];
+            await paring(sb.from('tehingu_read').update({ valine_id: x.valine_id }).eq('rea_id', esimene.rea_id));
+            if (x.seo.t.olek !== 0) await paring(sb.from('tehingud').update({ olek: 0 }).eq('tehing_id', x.seo.t.tehing_id));
+          } else {
+            const v = vaated[i];
+            const pangas = x.pangaKoht ? 'Pangas: ' + x.pangaKoht : null;
+            const tRead = v.siht.value
+              ? [{ konto_id: kontoId, summa: x.summa, valine_id: x.valine_id, lisakommentaar: pangas },
+                { konto_id: Number(v.siht.value), summa: -x.summa }]
+              : [{ konto_id: kontoId, summa: x.summa, kululiigi_id: v.liik.value || null, valine_id: x.valine_id, lisakommentaar: pangas }];
+            await paring(sb.rpc('salvesta_tehing', {
+              p: { kuupaev: x.kuupaev, koht: v.koht.value.trim(), kommentaar: v.kommentaar.value.trim(), olek: 0, allikas: 'import:swedbank', read: tRead },
+            }));
+          }
+          tehtud++;
+        }
+        if (loppsaldoLinnuke?.checked) {
+          await paring(sb.from('tasakaalustus').upsert(
+            { konto_id: kontoId, kuupaev: andmed.loppsaldo.kuupaev, panga_saldo: andmed.loppsaldo.summa, kommentaar: 'väljavõtte lõppsaldo' },
+            { onConflict: 'konto_id,kuupaev' }));
+        }
+      } catch (e) {
+        vigaEl.textContent = `Import katkes pärast ${tehtud} rida: ${e.message}`;
+        nupp.disabled = false;
+        return;
+      }
+      teade(`Imporditud ${tehtud} rida`);
+      await laeKohad();
+      location.hash = '#/tehingud';
+    }
+
+    ridadeKoht.replaceChildren(
+      h('div', { class: 'tabel-umbris' }, h('table', {},
+        h('thead', {}, h('tr', {}, h('th'), h('th', {}, 'Kuupäev'), h('th', {}, 'Koht'), h('th', {}, 'Kommentaar'),
+          h('th', { class: 'nr' }, 'Summa'), h('th', {}, 'Tüüp'), h('th', {}, 'Kululiik'))),
+        h('tbody', {}, vaated.map((v) => v.tr)))),
+      loppsaldoLinnuke && h('label', { style: 'display:flex;gap:8px;align-items:center;font-size:14px;color:inherit;margin-top:12px' },
+        loppsaldoLinnuke, `Lisa kontrollpunkt: lõppsaldo ${raha(andmed.loppsaldo.summa)} seisuga ${kp(andmed.loppsaldo.kuupaev)}`),
+      vigaEl,
+      h('div', { class: 'nupud', style: 'margin-top:12px' }, h('span', { class: 'vasak' }, kokkuEl), nupp));
+  }
+
+  kontoSelect.addEventListener('change', koosta);
+  tulemusEl.replaceChildren(h('div', { class: 'kaart' },
+    h('div', { class: 'read' },
+      h('div', {}, h('label', {}, 'Konto'), kontoSelect),
+      h('div', {}, h('label', {}, 'Väljavõttes'), h('div', { style: 'padding:7px 0' },
+        `${andmed.iban} · ${andmed.tehingud.length} tehingut`))),
+    ridadeKoht));
+  await koosta();
 }
 
 // ------------------------------------------------------------
