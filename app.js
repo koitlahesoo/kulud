@@ -85,7 +85,7 @@ async function paring(p) {
 // Andmed, mida läheb igal pool vaja
 // ------------------------------------------------------------
 
-const vahemalu = { kontod: [], kululiigid: [] };
+const vahemalu = { kontod: [], kululiigid: [], kohad: new Map() };
 const kontoNimi = (id) => vahemalu.kontod.find((k) => k.konto_id === id)?.nimi ?? '?';
 const kululiik = (id) => vahemalu.kululiigid.find((k) => k.kululiigi_id === id);
 const kululiigiNimi = (id) => {
@@ -100,6 +100,23 @@ async function laeYldandmed() {
   ]);
   vahemalu.kontod = kontod;
   vahemalu.kululiigid = kululiigid;
+  await laeKohad();
+}
+
+// Varem sisestatud kohad (uusim enne) koos viimase tehinguga, et uut
+// tehingut saaks sama koha järgi eeltäita.
+async function laeKohad() {
+  const tehingud = await paring(sb.from('tehingud')
+    .select('tehing_id, koht, kuupaev, tehingu_read(konto_id, kululiigi_id, summa, rida)')
+    .neq('koht', '')
+    .order('kuupaev', { ascending: false }).order('tehing_id', { ascending: false })
+    .limit(5000));
+  const kohad = new Map();
+  for (const t of tehingud) {
+    const voti = t.koht.trim().toLowerCase();
+    if (voti && !kohad.has(voti)) kohad.set(voti, t);
+  }
+  vahemalu.kohad = kohad;
 }
 
 function kontoValik(valitud, { koigis = false, tyhi = false } = {}) {
@@ -567,13 +584,25 @@ function avaDialoog(sisuEl) {
   return d;
 }
 
+function tehinguKoopia(t) {
+  return {
+    ...t,
+    tehing_id: null,
+    kuupaev: tana(),
+    allikas: 'kasitsi',
+    tehingu_read: t.tehingu_read.map((r) => ({ ...r, rea_id: null, valine_id: null })),
+  };
+}
+
 function tehinguDialoog(t) {
+  const muudan = t?.tehing_id != null;
   const read = t ? [...t.tehingu_read].sort((a, b) => a.rida - b.rida) : [];
   let tyyp = t ? tehinguTyyp(t) : 'kulu';
   const viimaneKonto = Number(localStorage.getItem('kulud.viimaneKonto')) || vahemalu.kontod.find((k) => k.aktiivne)?.konto_id;
 
   const kuupaev = kuupaevaVali(t?.kuupaev ?? tana(), { required: true });
-  const koht = h('input', { value: t?.koht ?? '', placeholder: 'nt Rimi, palk, üür' });
+  const kohaLoend = h('datalist', { id: 'kohad' }, [...vahemalu.kohad.values()].map((x) => h('option', { value: x.koht })));
+  const koht = h('input', { value: t?.koht ?? '', placeholder: 'nt Rimi, palk, üür', list: 'kohad', autocomplete: 'off' });
   const olek = h('select', {}, OLEKU_VALIK.map(([i, o]) => h('option', { value: i, selected: i === (t?.olek ?? 0) }, o)));
   const kommentaar = h('input', { value: t?.kommentaar ?? '' });
 
@@ -652,6 +681,21 @@ function tehinguDialoog(t) {
   }
   naitaTyyp();
 
+  // Uue tehingu puhul täidame tuttava koha järgi konto ja kululiigid viimase sama koha tehingu põhjal
+  koht.addEventListener('change', () => {
+    if (t) return;
+    if (ktRead.some((x) => x.liik.value || x.summa.value.trim())) return;
+    const eelmine = vahemalu.kohad.get(koht.value.trim().toLowerCase());
+    if (!eelmine || !eelmine.tehingu_read.length) return;
+    const eRead = [...eelmine.tehingu_read].sort((a, b) => a.rida - b.rida);
+    if (tehinguTyyp(eelmine) === 'ulekanne') return;
+    tyyp = eRead.every((x) => Number(x.summa) >= 0) ? 'tulu' : 'kulu';
+    naitaTyyp();
+    kontoKT.value = eRead[0].konto_id;
+    while (ktRead.length < eRead.length) lisaKtRida();
+    eRead.forEach((x, i) => { ktRead[i].liik.value = x.kululiigi_id ?? ''; });
+  });
+
   const vigaEl = h('div', { class: 'viga-tekst' });
 
   function koostaRead() {
@@ -695,7 +739,7 @@ function tehinguDialoog(t) {
     try { tRead = koostaRead(); } catch (err) { vigaEl.textContent = err.message; return; }
     await paring(sb.rpc('salvesta_tehing', {
       p: {
-        tehing_id: t?.tehing_id ?? null,
+        tehing_id: muudan ? t.tehing_id : null,
         kuupaev: kuupaev.value,
         koht: koht.value.trim(),
         kommentaar: kommentaar.value.trim(),
@@ -707,6 +751,7 @@ function tehinguDialoog(t) {
     teade('Salvestatud');
     d.close();
     joonistaRaam();
+    laeKohad().catch(() => {});
     if (uusPeale) tehinguDialoog(null);
   }
 
@@ -720,7 +765,8 @@ function tehinguDialoog(t) {
 
   const vorm = h('form', { onsubmit: (e) => salvesta(e) },
     h('div', { class: 'nupud', style: 'margin-bottom:16px' },
-      h('h2', { class: 'vasak', style: 'margin:0' }, t ? 'Muuda tehingut' : 'Uus tehing'), tyybiValik),
+      h('h2', { class: 'vasak', style: 'margin:0' }, muudan ? 'Muuda tehingut' : t ? 'Uus tehing (koopia)' : 'Uus tehing'), tyybiValik),
+    kohaLoend,
     h('div', { class: 'read' },
       h('div', {}, h('label', {}, 'Kuupäev'), kuupaev),
       h('div', { style: 'grid-column: span 2' }, h('label', {}, 'Koht / kellelt'), koht),
@@ -731,14 +777,16 @@ function tehinguDialoog(t) {
     t?.allikas && t.allikas !== 'kasitsi' && h('p', { class: 'hall vaike' }, 'Allikas: ' + t.allikas),
     vigaEl,
     h('div', { class: 'nupud', style: 'margin-top:16px' },
-      t && h('button', { type: 'button', class: 'oht', onclick: kustuta }, 'Kustuta'),
+      muudan && h('button', { type: 'button', class: 'oht', onclick: kustuta }, 'Kustuta'),
+      muudan && h('button', { type: 'button', title: 'Loo sama sisuga uus tehing tänase kuupäevaga',
+        onclick: () => { d.close(); tehinguDialoog(tehinguKoopia(t)); } }, 'Koopia'),
       h('span', { class: 'vasak' }),
       h('button', { type: 'button', onclick: () => d.close() }, 'Loobu'),
-      !t && h('button', { type: 'button', onclick: (e) => salvesta(e, true) }, 'Salvesta ja uus'),
+      !muudan && h('button', { type: 'button', onclick: (e) => salvesta(e, true) }, 'Salvesta ja uus'),
       h('button', { class: 'pohi', type: 'submit' }, 'Salvesta')));
 
   const d = avaDialoog(vorm);
-  (t ? koht : (tyyp === 'ulekanne' ? ulSumma : koht)).focus();
+  (muudan ? koht : t ? kuupaev : koht).focus();
 }
 
 // ------------------------------------------------------------
