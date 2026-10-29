@@ -418,14 +418,23 @@ async function lehtYlevaade() {
       h('div', { class: 'kaart' },
         h('h2', {}, 'Kontode seis täna'),
         h('div', { class: 'tabel-umbris' }, h('table', {},
-          h('thead', {}, h('tr', {}, h('th', {}, 'Konto'), h('th', { class: 'nr' }, 'Saldo'), h('th', { class: 'nr' }, 'Planeeritud'))),
+          h('thead', {}, h('tr', {}, h('th', {}, 'Konto'), h('th', { class: 'nr' }, 'Saldo'),
+            h('th', { class: 'nr' }, 'Broneeritud'), h('th', { class: 'nr' }, 'Vaba jääk'), h('th', { class: 'nr' }, 'Planeeritud'))),
           h('tbody', {},
-            saldod.map((s) => h('tr', {},
-              h('td', {}, s.nimi, s.valuuta !== 'EUR' && h('span', { class: 'silt', style: 'margin-left:6px' }, s.valuuta),
-                s.konto_tyyp === 2 && s.limiit != null && h('div', { class: 'hall vaike' }, 'vaba ' + raha(Number(s.limiit) + Number(s.hetke_saldo)))),
-              h('td', { class: 'nr' }, rahaEl(s.hetke_saldo)),
-              h('td', { class: 'nr hall' }, Number(s.planeeritud) ? raha(s.planeeritud) : ''))),
-            saldod.length === 0 && h('tr', {}, h('td', { colspan: 3, class: 'tyhi' }, 'Kontosid pole veel. Lisa need lehel Kontod.')))))),
+            saldod.map((s) => {
+              // Nagu pangas: saldo = kinnitatud tehingud, vaba jääk = saldo + limiit − broneeringud
+              const saldo = Number(s.saldo_kinnitatud ?? s.hetke_saldo);
+              const broneeritud = Number(s.broneeritud ?? 0);
+              const vaba = Number(s.hetke_saldo) + (s.konto_tyyp === 2 ? Number(s.limiit ?? 0) : 0);
+              return h('tr', {},
+                h('td', {}, s.nimi, s.valuuta !== 'EUR' && h('span', { class: 'silt', style: 'margin-left:6px' }, s.valuuta),
+                  s.konto_tyyp === 2 && s.limiit != null && h('div', { class: 'hall vaike' }, 'limiit ' + raha(s.limiit))),
+                h('td', { class: 'nr' }, rahaEl(saldo)),
+                h('td', { class: 'nr hall' }, broneeritud ? raha(broneeritud) : ''),
+                h('td', { class: 'nr' }, raha(vaba)),
+                h('td', { class: 'nr hall' }, Number(s.planeeritud) ? raha(s.planeeritud) : ''));
+            }),
+            saldod.length === 0 && h('tr', {}, h('td', { colspan: 5, class: 'tyhi' }, 'Kontosid pole veel. Lisa need lehel Kontod.')))))),
       h('div', { class: 'kaart' },
         h('h2', {}, 'Kuu kokkuvõte: ' + kuuNimi(valitudKuu)),
         h('table', {}, h('tbody', {},

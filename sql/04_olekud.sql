@@ -9,7 +9,8 @@ update tehingud set olek = 0 where olek = 3;
 alter table tehingud drop constraint if exists tehingud_olek_check;
 alter table tehingud add constraint tehingud_olek_check check (olek in (0, 1, 2, 4));
 
-create or replace view v_konto_saldo as
+drop view if exists v_konto_saldo;
+create view v_konto_saldo as
 select
     k.konto_id, k.nimi, k.number, k.pank, k.valuuta, k.konto_tyyp, k.limiit,
     k.alg_saldo,
@@ -23,7 +24,8 @@ left join tehingud t     on t.tehing_id = r.tehing_id
 where k.aktiivne
 group by k.konto_id;
 
-create or replace view v_tasakaalustus as
+drop view if exists v_tasakaalustus;
+create view v_tasakaalustus as
 select
     ts.tasakaal_id, ts.konto_id, k.nimi as konto_nimi, ts.kuupaev,
     ts.panga_saldo,
@@ -43,3 +45,5 @@ join kontod k on k.konto_id = ts.konto_id;
 
 alter view v_konto_saldo   set (security_invoker = on);
 alter view v_tasakaalustus set (security_invoker = on);
+
+grant select on v_konto_saldo, v_tasakaalustus to authenticated;

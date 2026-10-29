@@ -114,7 +114,9 @@ select
     coalesce(sum(r.summa) filter (where t.olek in (0, 4)), 0)              as liikumised,
     k.alg_saldo + coalesce(sum(r.summa) filter (where t.olek in (0, 4)), 0) as hetke_saldo,
     coalesce(sum(coalesce(r.eeldatav_summa, r.summa)) filter (where t.olek in (1, 2)), 0)
-                                                                            as planeeritud
+                                                                            as planeeritud,
+    k.alg_saldo + coalesce(sum(r.summa) filter (where t.olek = 0), 0)      as saldo_kinnitatud,
+    coalesce(-sum(r.summa) filter (where t.olek = 4), 0)                   as broneeritud
 from kontod k
 left join tehingu_read r on r.konto_id = k.konto_id
 left join tehingud t     on t.tehing_id = r.tehing_id
@@ -129,12 +131,12 @@ select
     k.alg_saldo + coalesce((
         select sum(r.summa)
         from tehingu_read r join tehingud t on t.tehing_id = r.tehing_id
-        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek in (0, 4)
+        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek = 0
     ), 0)                                                      as arvutatud_saldo,
     ts.panga_saldo - (k.alg_saldo + coalesce((
         select sum(r.summa)
         from tehingu_read r join tehingud t on t.tehing_id = r.tehing_id
-        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek in (0, 4)
+        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek = 0
     ), 0))                                                     as erinevus,
     ts.on_kinnitatud, ts.kommentaar
 from tasakaalustus ts
