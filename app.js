@@ -787,7 +787,9 @@ function tehinguDialoog(t) {
     tyybiSisu,
     h('div', { class: 'read', style: 'margin-top:12px' },
       h('div', {}, h('label', {}, 'Kommentaar'), kommentaar)),
-    t?.allikas && t.allikas !== 'kasitsi' && h('p', { class: 'hall vaike' }, 'Allikas: ' + t.allikas),
+    (t?.kirjendatud && t.kirjendatud !== t.kuupaev || t?.allikas && t.allikas !== 'kasitsi') && h('p', { class: 'hall vaike' },
+      [t.kirjendatud && t.kirjendatud !== t.kuupaev && 'Pangas kirjendatud ' + kp(t.kirjendatud),
+        t.allikas && t.allikas !== 'kasitsi' && 'Allikas: ' + t.allikas].filter(Boolean).join(' · ')),
     vigaEl,
     h('div', { class: 'nupud', style: 'margin-top:16px' },
       muudan && h('button', { type: 'button', class: 'oht', onclick: kustuta }, 'Kustuta'),
@@ -1080,18 +1082,22 @@ function swedbankRead(tabel) {
     if (tyyp !== '20' || !kuupaev || summa == null || Number.isNaN(summa)) continue;
     const selgitus = (rida[v.selgitus] || '').replace(/^'/, '').trim();
     const kaardimakse = /^\d{6}\*+\d{4}\s+(\d\d\.\d\d\.\d\d)/.exec(selgitus);
+    // Kaardimakse selgituses on ostu päev (nagu tšekil); pangas kirjendatakse see hiljem
+    const ostuPaev = kaardimakse && loeKuupaev(kaardimakse[1]);
     tulemus.tehingud.push({
-      kuupaev,
+      kuupaev: ostuPaev || kuupaev,
+      kirjendatud: kuupaev,
       summa: rida[v.dk] === 'D' ? -summa : summa,
       valuuta: rida[v.valuuta] || 'EUR',
       pangaKoht: puhastaKoht(rida[v.saaja], selgitus),
-      kommentaar: kaardimakse ? 'kaart ' + kaardimakse[1] : (selgitus === '.' ? '' : selgitus),
+      kommentaar: kaardimakse ? '' : (selgitus === '.' ? '' : selgitus),
       valine_id: rida[v.arhiiv] || null,
     });
   }
   return tulemus;
 }
 
+const pangaPaev = (x) => x.kirjendatud !== x.kuupaev && h('div', { class: 'hall vaike' }, 'pangas ' + kp(x.kirjendatud).slice(0, 5));
 const normIban = (s) => (s || '').replace(/\s/g, '').toUpperCase();
 
 async function lehtImport() {
@@ -1173,7 +1179,7 @@ async function naitaImporti(andmed, tulemusEl) {
       if (x.olek !== 'uus') {
         return {
           tr: h('tr', { class: x.olek === 'olemas' ? 'hall' : '' },
-            h('td', {}, linnuke), h('td', {}, kp(x.kuupaev)),
+            h('td', {}, linnuke), h('td', {}, kp(x.kuupaev), pangaPaev(x)),
             h('td', {}, x.olek === 'olemas' ? x.pangaKoht : x.seo.t.koht || x.pangaKoht),
             h('td', { class: 'hall' }, x.kommentaar),
             h('td', { class: 'nr' }, rahaEl(x.summa)),
@@ -1195,7 +1201,7 @@ async function naitaImporti(andmed, tulemusEl) {
       return {
         koht, kommentaar, liik, siht,
         tr: h('tr', {},
-          h('td', {}, linnuke), h('td', { style: 'white-space:nowrap' }, kp(x.kuupaev)),
+          h('td', {}, linnuke), h('td', { style: 'white-space:nowrap' }, kp(x.kuupaev), pangaPaev(x)),
           h('td', { style: 'min-width:160px' }, koht), h('td', { style: 'min-width:160px' }, kommentaar),
           h('td', { class: 'nr' }, rahaEl(x.summa)),
           h('td', { style: 'width:150px' }, siht), h('td', { style: 'min-width:180px' }, liik)),
@@ -1224,7 +1230,7 @@ async function naitaImporti(andmed, tulemusEl) {
           if (x.olek === 'seo') {
             const esimene = [...x.seo.kontoRead].sort((a, b) => a.rida - b.rida)[0];
             await paring(sb.from('tehingu_read').update({ valine_id: x.valine_id }).eq('rea_id', esimene.rea_id));
-            if (x.seo.t.olek !== 0) await paring(sb.from('tehingud').update({ olek: 0 }).eq('tehing_id', x.seo.t.tehing_id));
+            await paring(sb.from('tehingud').update({ olek: 0, kirjendatud: x.kirjendatud }).eq('tehing_id', x.seo.t.tehing_id));
           } else {
             const v = vaated[i];
             const pangas = x.pangaKoht ? 'Pangas: ' + x.pangaKoht : null;
@@ -1233,7 +1239,7 @@ async function naitaImporti(andmed, tulemusEl) {
                 { konto_id: Number(v.siht.value), summa: -x.summa }]
               : [{ konto_id: kontoId, summa: x.summa, kululiigi_id: v.liik.value || null, valine_id: x.valine_id, lisakommentaar: pangas }];
             await paring(sb.rpc('salvesta_tehing', {
-              p: { kuupaev: x.kuupaev, koht: v.koht.value.trim(), kommentaar: v.kommentaar.value.trim(), olek: 0, allikas: 'import:swedbank', read: tRead },
+              p: { kuupaev: x.kuupaev, kirjendatud: x.kirjendatud, koht: v.koht.value.trim(), kommentaar: v.kommentaar.value.trim(), olek: 0, allikas: 'import:swedbank', read: tRead },
             }));
           }
           tehtud++;

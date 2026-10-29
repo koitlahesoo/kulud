@@ -54,7 +54,8 @@ create index ix_kululiigid_grupp on kululiigid (grupp, nimi);
 --       (3=makstud kaotati 2026-10-29, vt 04_olekud.sql)
 create table tehingud (
     tehing_id    integer    generated always as identity primary key,
-    kuupaev      date       not null default current_date,
+    kuupaev      date       not null default current_date,  -- tegeliku tehingu päev
+    kirjendatud  date,                                       -- panga kirjendamise päev (impordil)
     koht         text       not null default '',
     kommentaar   text,
     olek         smallint   not null default 0 check (olek in (0, 1, 2, 4)),
@@ -131,12 +132,12 @@ select
     k.alg_saldo + coalesce((
         select sum(r.summa)
         from tehingu_read r join tehingud t on t.tehing_id = r.tehing_id
-        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek = 0
+        where r.konto_id = ts.konto_id and coalesce(t.kirjendatud, t.kuupaev) <= ts.kuupaev and t.olek = 0
     ), 0)                                                      as arvutatud_saldo,
     ts.panga_saldo - (k.alg_saldo + coalesce((
         select sum(r.summa)
         from tehingu_read r join tehingud t on t.tehing_id = r.tehing_id
-        where r.konto_id = ts.konto_id and t.kuupaev <= ts.kuupaev and t.olek = 0
+        where r.konto_id = ts.konto_id and coalesce(t.kirjendatud, t.kuupaev) <= ts.kuupaev and t.olek = 0
     ), 0))                                                     as erinevus,
     ts.on_kinnitatud, ts.kommentaar
 from tasakaalustus ts
